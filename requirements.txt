@@ -1,0 +1,2 @@
+Adafruit-Blinka>=8.0.0
+adafruit-circuitpython-busdevice>=5.2.0
