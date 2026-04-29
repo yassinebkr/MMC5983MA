@@ -5,7 +5,13 @@ Addresses, bit fields, and timing constants are kept here so the driver in
 SparkFun Arduino library and the MEMSIC datasheet (Rev D).
 """
 
-from micropython import const
+try:
+    from micropython import const
+except ImportError:
+    # CPython fallback so tests can import this module without a
+    # MicroPython/CircuitPython runtime.
+    def const(value):
+        return value
 
 # ---------------------------------------------------------------------------
 # Bus addresses
