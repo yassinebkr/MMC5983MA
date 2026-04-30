@@ -229,17 +229,29 @@ class MMC5983MA:
     def magnetic_raw(self):
         """Tuple of raw 18-bit unsigned X, Y, Z readings (no scaling).
 
-        Triggers a single-shot measurement when not in continuous mode. In
-        continuous mode the latest available reading is returned; ensure
+        In single-shot mode, fires a SET pulse before triggering the
+        measurement. Without a recent SET, the MMC5983MA's internal element
+        sits in an indeterminate magnetization state and the reading is
+        dominated by the residual offset (datasheet calls this out: SET/RESET
+        is required to define the polarity of the bridge). In continuous
+        mode this method returns the latest sample directly — when
+        ``configure_continuous_mode`` is called with ``automatic_set_reset=True``
+        (the default) the chip handles SET/RESET internally; ensure
         ``status['magnetic_ready']`` if you need a guaranteed-fresh sample.
+
+        For the highest accuracy use :meth:`offset_canceled_read`, which
+        takes both SET and RESET measurements and subtracts the offset
+        exactly.
         """
         if not (self._ctrl2_shadow & reg.CTRL2_CMM_EN):
+            self.set_coil()
             self._trigger_magnetic_and_wait()
         return self._read_raw_xyz()
 
     @property
     def magnetic(self):
-        """Tuple ``(x, y, z)`` in microtesla."""
+        """Tuple ``(x, y, z)`` in microtesla. See :attr:`magnetic_raw` for
+        the SET-pulse behaviour applied to single-shot reads."""
         rx, ry, rz = self.magnetic_raw
         return (
             self._to_microtesla(rx),
