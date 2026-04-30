@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "circuitpython"))
 
 from mmc5983ma import MMC5983MA  # noqa: E402
 from mmc5983ma import registers as reg  # noqa: E402
