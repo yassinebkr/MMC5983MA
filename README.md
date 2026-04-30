@@ -1,6 +1,5 @@
 # MMC5983MA
 
-## Author : Benkhira Yassine
 
 A driver for the [MEMSIC MMC5983MA](https://www.memsic.com/magnetometer-2) 3-axis
 magnetometer with 18-bit resolution and ±8 gauss full-scale range.
@@ -113,6 +112,8 @@ The driver follows patterns proven in the companion ICM-42688 port:
   unexpected state); no bare `except:` clauses.
 - **Manual register access** rather than `busio` helpers, so the same code
   shape ports cleanly to MicroPython.
+
+## Author : Benkhira Yassine
 
 ## License
 
