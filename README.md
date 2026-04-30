@@ -1,20 +1,23 @@
 # MMC5983MA
 
+## Author : Benkhira Yassine
+
 A driver for the [MEMSIC MMC5983MA](https://www.memsic.com/magnetometer-2) 3-axis
 magnetometer with 18-bit resolution and ±8 gauss full-scale range.
 
 This repository hosts implementations for several embedded targets:
 
-| Platform      | Status        | Path             |
-|---------------|---------------|------------------|
-| CircuitPython | Available     | `circuitpython/` |
-| MicroPython   | Coming soon   | `micropython/`   |
-| Arduino       | Coming soon   | `arduino/`       |
+| Platform      | Status               | Path             |
+|---------------|----------------------|------------------|
+| CircuitPython | Hardware-validated   | `circuitpython/` |
+| MicroPython   | Coming soon          | `micropython/`   |
+| Arduino       | Coming soon          | `arduino/`       |
 
 The CircuitPython driver was developed and validated on an
-[Adafruit Feather RP2040 with RFM95 LoRa Radio](https://www.adafruit.com/product/5714),
-the target platform for the aerospace telemetry application that drives this
-project.
+[Adafruit Feather RP2040 with RFM95 LoRa Radio](https://www.adafruit.com/product/5714)
+with the sensor on the STEMMA QT bus. Bring-up reads the expected Earth
+field (|B| ≈ 47 µT), self-test passes, and a 10-second continuous-mode
+stress run shows |B| variation within 0.22 µT.
 
 ## Sensor at a glance
 
@@ -41,7 +44,52 @@ print(f"X={x:+.2f} µT  Y={y:+.2f} µT  Z={z:+.2f} µT")
 ```
 
 See [`circuitpython/examples/`](circuitpython/examples/) for SPI, continuous
-mode, calibration, self-test, and compass-heading demos.
+mode, calibration, self-test, compass-heading, and a comprehensive
+[`hardware_bringup.py`](circuitpython/examples/hardware_bringup.py) that
+exercises every public path in one run.
+
+## Repository layout
+
+```
+/
+├── README.md, LICENSE, pyproject.toml, requirements.txt, .pre-commit-config.yaml
+├── circuitpython/
+│   ├── mmc5983ma/        driver package (deploys to CIRCUITPY/lib/)
+│   │   ├── __init__.py   driver class
+│   │   └── registers.py  addresses, bit fields, timing constants
+│   ├── examples/         basic_i2c, basic_spi, continuous_mode, calibration,
+│   │                     selftest, heading_calculation, hardware_bringup
+│   └── docs/             INSTALL.md, API_REFERENCE.md
+├── tests/                pytest unit tests (run on CPython, not deployed)
+│   ├── conftest.py       MockI2C fixture emulating the chip's register set
+│   ├── test_basic_functionality.py
+│   └── test_advanced_features.py
+└── scripts/              host-side dev tools
+    ├── repl_driver.py    drives the CircuitPython REPL over USB serial
+    └── stress.py         10-second stability run, copy to CIRCUITPY root
+```
+
+## Running tests
+
+Unit tests run on CPython against an in-process mock of the chip's
+register set:
+
+```bash
+pip install pytest pyserial
+python -m pytest tests/ -v
+```
+
+To validate against real hardware, copy `circuitpython/mmc5983ma/` to
+`CIRCUITPY/lib/`, copy `circuitpython/examples/hardware_bringup.py` to
+`CIRCUITPY/`, and run from the REPL:
+
+```python
+>>> import hardware_bringup as hb
+>>> hb.test()
+```
+
+Or use [`scripts/repl_driver.py`](scripts/repl_driver.py) to drive the
+REPL automatically over USB serial and capture the output.
 
 ## Installation
 
