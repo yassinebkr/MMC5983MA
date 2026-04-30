@@ -70,6 +70,14 @@ class TestContinuousMode:
         assert not (i2c.regs[reg.REG_INT_CTRL_2] & reg.CTRL2_CMM_EN)
         assert mag.continuous_mode is False
 
+    def test_continuous_mode_blocks_until_first_sample_ready(self, mag, i2c):
+        # Without the startup wait the driver returned all-zero data on the
+        # first read, computing |B|≈1419 µT. The wait must time out cleanly
+        # if the chip never asserts MEAS_M_DONE.
+        i2c.suppress_meas_done = True
+        with pytest.raises(OSError, match="continuous"):
+            mag.configure_continuous_mode(100)
+
     def test_continuous_mode_skips_single_shot_trigger(self, mag, i2c):
         mag.configure_continuous_mode(100)
         i2c.writes.clear()

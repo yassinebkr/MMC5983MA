@@ -403,6 +403,20 @@ class MMC5983MA:
         )
         self._write_register(reg.REG_INT_CTRL_2, self._ctrl2_shadow)
 
+        # Block until the first sample is in the data registers. Without this,
+        # the very first read after enabling continuous mode hits all-zero
+        # registers and computes |B|≈1419 µT (= sqrt(3)·offset·sensitivity).
+        # Found on hardware on a Feather RP2040 stress run; see commit log.
+        self._write_register(reg.REG_STATUS, reg.STATUS_MEAS_M_DONE)
+        startup_timeout_ms = self._measurement_timeout_ms() + 5
+        elapsed = 0
+        while elapsed <= startup_timeout_ms:
+            if self._read_register(reg.REG_STATUS) & reg.STATUS_MEAS_M_DONE:
+                return
+            time.sleep(reg.MEAS_POLL_INTERVAL_MS / 1000)
+            elapsed += reg.MEAS_POLL_INTERVAL_MS
+        raise OSError("MMC5983MA continuous-mode startup timed out")
+
     def configure_single_shot_mode(self):
         """Disable continuous mode and return to one-shot triggering."""
         self._ctrl2_shadow &= ~(reg.CTRL2_CMM_EN | reg.CTRL2_CM_FREQ_MASK)

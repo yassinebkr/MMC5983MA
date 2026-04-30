@@ -74,6 +74,16 @@ class MockI2C:
             for i in range(7):
                 in_buf[i] = self._mag_payload[i]
             return
+        if start == reg.REG_STATUS and len(in_buf) == 1:
+            # In continuous mode the chip refreshes the data and re-asserts
+            # MEAS_M_DONE between reads. Mirror that here so the driver's
+            # post-config wait and any subsequent status polls find data.
+            s = self.regs[start]
+            cmm_on = self.regs[reg.REG_INT_CTRL_2] & reg.CTRL2_CMM_EN
+            if cmm_on and not self.suppress_meas_done:
+                s |= reg.STATUS_MEAS_M_DONE
+            in_buf[0] = s
+            return
         for i in range(len(in_buf)):
             in_buf[i] = self.regs[(start + i) & 0xFF]
 
