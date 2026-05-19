@@ -1,0 +1,43 @@
+#######################################
+# Syntax Coloring Map For MMC5983MA
+#######################################
+
+#######################################
+# Class (KEYWORD1)
+#######################################
+
+MMC5983MA	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+isConnected	KEYWORD2
+reset	KEYWORD2
+readMagneticUT	KEYWORD2
+readMagneticRaw	KEYWORD2
+readMagneticOffsetCancelled	KEYWORD2
+readTemperatureC	KEYWORD2
+setCoil	KEYWORD2
+resetCoil	KEYWORD2
+setAutomaticSetReset	KEYWORD2
+setBandwidth	KEYWORD2
+getBandwidth	KEYWORD2
+startContinuousMode	KEYWORD2
+stopContinuousMode	KEYWORD2
+isContinuousModeEnabled	KEYWORD2
+isDataReady	KEYWORD2
+runSelftest	KEYWORD2
+clearInterrupt	KEYWORD2
+setPeriodicSet	KEYWORD2
+disablePeriodicSet	KEYWORD2
+setInterruptEnabled	KEYWORD2
+setSpi3Wire	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+MMC5983MA_I2C_ADDRESS	LITERAL1
+MMC5983MA_PROD_ID	LITERAL1
