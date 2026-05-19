@@ -1,5 +1,9 @@
 // MMC5983MA driver implementation.
 //
+// The three bus-abstraction methods (readRegister, readBurst, writeRegister)
+// live inline at the bottom of MMC5983MA.h so the compiler can inline them
+// into the rest of the driver and into the user's sketch.
+//
 // I2C and SPI are both first-class bus paths: every read/write method
 // branches on which constructor was used and the SPI branch is a real
 // implementation, not a stub.
@@ -12,6 +16,10 @@
 //   2. startContinuousMode clears MEAS_M_DONE and blocks until the chip
 //      reasserts it. Without that wait, the first read after CMM_EN sees
 //      all-zero data registers and reports |B|~=1419 uT.
+//
+// Every public method that talks to the bus clears _last_error on entry
+// and sets it on the failure path so lastError() always reflects the
+// most recent call's outcome.
 
 #include "MMC5983MA.h"
 
@@ -28,12 +36,13 @@ MMC5983MA::MMC5983MA(TwoWire& wire, uint8_t address)
       _spi(nullptr),
       _i2c_address(address),
       _cs_pin(0),
-      _spi_clock_hz(0),
+      _spi_settings(SPISettings(8000000UL, MSBFIRST, SPI_MODE0)),
       _ctrl0_shadow(0),
       _ctrl1_shadow(0),
       _ctrl2_shadow(0),
       _ctrl3_shadow(0),
-      _bandwidth_code(reg::BW_100_HZ) {
+      _bandwidth_code(reg::BW_100_HZ),
+      _last_error(Error::None) {
   for (uint8_t i = 0; i < sizeof(_magBuf); ++i) {
     _magBuf[i] = 0;
   }
@@ -44,15 +53,37 @@ MMC5983MA::MMC5983MA(SPIClass& spi, uint8_t cs_pin, uint32_t spi_clock_hz)
       _spi(&spi),
       _i2c_address(0),
       _cs_pin(cs_pin),
-      _spi_clock_hz(spi_clock_hz),
+      _spi_settings(SPISettings(spi_clock_hz, MSBFIRST, SPI_MODE0)),
       _ctrl0_shadow(0),
       _ctrl1_shadow(0),
       _ctrl2_shadow(0),
       _ctrl3_shadow(0),
-      _bandwidth_code(reg::BW_100_HZ) {
+      _bandwidth_code(reg::BW_100_HZ),
+      _last_error(Error::None) {
   for (uint8_t i = 0; i < sizeof(_magBuf); ++i) {
     _magBuf[i] = 0;
   }
+}
+
+MMC5983MA::MMC5983MA(SPIClass& spi, uint8_t cs_pin, SPISettings settings)
+    : _wire(nullptr),
+      _spi(&spi),
+      _i2c_address(0),
+      _cs_pin(cs_pin),
+      _spi_settings(settings),
+      _ctrl0_shadow(0),
+      _ctrl1_shadow(0),
+      _ctrl2_shadow(0),
+      _ctrl3_shadow(0),
+      _bandwidth_code(reg::BW_100_HZ),
+      _last_error(Error::None) {
+  for (uint8_t i = 0; i < sizeof(_magBuf); ++i) {
+    _magBuf[i] = 0;
+  }
+}
+
+void MMC5983MA::setSpiSettings(SPISettings settings) {
+  _spi_settings = settings;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,12 +91,18 @@ MMC5983MA::MMC5983MA(SPIClass& spi, uint8_t cs_pin, uint32_t spi_clock_hz)
 // ---------------------------------------------------------------------------
 
 bool MMC5983MA::begin() {
+  _last_error = Error::None;
   if (_spi != nullptr) {
     pinMode(_cs_pin, OUTPUT);
     digitalWrite(_cs_pin, HIGH);
   }
 
-  if (!isConnected()) {
+  uint8_t prod_id = 0;
+  if (!readRegister(reg::REG_PROD_ID, &prod_id)) {
+    return false;
+  }
+  if (prod_id != reg::PROD_ID) {
+    _last_error = Error::IdMismatch;
     return false;
   }
   reset();
@@ -73,14 +110,20 @@ bool MMC5983MA::begin() {
 }
 
 bool MMC5983MA::isConnected() {
+  _last_error = Error::None;
   uint8_t prod_id = 0;
   if (!readRegister(reg::REG_PROD_ID, &prod_id)) {
     return false;
   }
-  return prod_id == reg::PROD_ID;
+  if (prod_id != reg::PROD_ID) {
+    _last_error = Error::IdMismatch;
+    return false;
+  }
+  return true;
 }
 
 void MMC5983MA::reset() {
+  _last_error = Error::None;
   writeRegister(reg::REG_INT_CTRL_1, reg::CTRL1_SW_RST);
   delay(reg::RESET_DELAY_MS);
   _ctrl0_shadow = 0;
@@ -88,82 +131,6 @@ void MMC5983MA::reset() {
   _ctrl2_shadow = 0;
   _ctrl3_shadow = 0;
   _bandwidth_code = reg::BW_100_HZ;
-}
-
-// ---------------------------------------------------------------------------
-// Bus abstraction -- I2C / SPI branches
-// ---------------------------------------------------------------------------
-
-bool MMC5983MA::readRegister(uint8_t address, uint8_t* value) {
-  if (_wire != nullptr) {
-    _wire->beginTransmission(_i2c_address);
-    _wire->write(address);
-    if (_wire->endTransmission(false) != 0) {
-      return false;
-    }
-    if (_wire->requestFrom((uint8_t)_i2c_address, (uint8_t)1) != 1) {
-      return false;
-    }
-    *value = _wire->read();
-    return true;
-  }
-
-  // SPI: MSB=1 selects read; lower 7 bits are the register address.
-  _spi->beginTransaction(SPISettings(_spi_clock_hz, MSBFIRST, SPI_MODE0));
-  digitalWrite(_cs_pin, LOW);
-  _spi->transfer((uint8_t)(address | reg::SPI_READ));
-  *value = _spi->transfer(0x00);
-  digitalWrite(_cs_pin, HIGH);
-  _spi->endTransaction();
-  return true;
-}
-
-bool MMC5983MA::readBurst(uint8_t address, uint8_t* buffer, size_t length) {
-  if (_wire != nullptr) {
-    _wire->beginTransmission(_i2c_address);
-    _wire->write(address);
-    if (_wire->endTransmission(false) != 0) {
-      return false;
-    }
-    size_t got = _wire->requestFrom((uint8_t)_i2c_address, (uint8_t)length);
-    if (got != length) {
-      return false;
-    }
-    for (size_t i = 0; i < length; ++i) {
-      buffer[i] = _wire->read();
-    }
-    return true;
-  }
-
-  // SPI: write address with MSB=1, then clock out `length` dummy bytes;
-  // the chip auto-increments its internal address pointer for each byte.
-  _spi->beginTransaction(SPISettings(_spi_clock_hz, MSBFIRST, SPI_MODE0));
-  digitalWrite(_cs_pin, LOW);
-  _spi->transfer((uint8_t)(address | reg::SPI_READ));
-  for (size_t i = 0; i < length; ++i) {
-    buffer[i] = _spi->transfer(0x00);
-  }
-  digitalWrite(_cs_pin, HIGH);
-  _spi->endTransaction();
-  return true;
-}
-
-bool MMC5983MA::writeRegister(uint8_t address, uint8_t value) {
-  if (_wire != nullptr) {
-    _wire->beginTransmission(_i2c_address);
-    _wire->write(address);
-    _wire->write(value);
-    return _wire->endTransmission() == 0;
-  }
-
-  // SPI: MSB=0 selects write.
-  _spi->beginTransaction(SPISettings(_spi_clock_hz, MSBFIRST, SPI_MODE0));
-  digitalWrite(_cs_pin, LOW);
-  _spi->transfer((uint8_t)(address & 0x7F));
-  _spi->transfer(value);
-  digitalWrite(_cs_pin, HIGH);
-  _spi->endTransaction();
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +168,7 @@ bool MMC5983MA::triggerMagneticAndWait() {
     }
     delay(reg::MEAS_POLL_INTERVAL_MS);
   }
+  _last_error = Error::MeasurementTimeout;
   return false;
 }
 
@@ -227,10 +195,11 @@ float MMC5983MA::toMicrotesla(uint32_t raw) {
 }
 
 // ---------------------------------------------------------------------------
-// Magnetic measurement
+// Magnetic measurement -- synchronous
 // ---------------------------------------------------------------------------
 
 bool MMC5983MA::readMagneticRaw(uint32_t* x, uint32_t* y, uint32_t* z) {
+  _last_error = Error::None;
   // Quirk #1: in single-shot mode, fire SET before the measurement so the
   // bridge polarity is defined. Without this, the reading is dominated by
   // the chip's residual offset and indoor field looks like ~11 uT.
@@ -254,7 +223,40 @@ bool MMC5983MA::readMagneticUT(float* x, float* y, float* z) {
   return true;
 }
 
+bool MMC5983MA::readMagneticAxisRaw(Axis axis, uint32_t* value) {
+  _last_error = Error::None;
+  if (value == nullptr) {
+    _last_error = Error::InvalidArgument;
+    return false;
+  }
+  uint32_t x, y, z;
+  if (!readMagneticRaw(&x, &y, &z)) {
+    return false;
+  }
+  switch (axis) {
+    case Axis::X: *value = x; return true;
+    case Axis::Y: *value = y; return true;
+    case Axis::Z: *value = z; return true;
+  }
+  _last_error = Error::InvalidArgument;
+  return false;
+}
+
+bool MMC5983MA::readMagneticAxisUT(Axis axis, float* value) {
+  uint32_t raw;
+  if (!readMagneticAxisRaw(axis, &raw)) {
+    return false;
+  }
+  if (value == nullptr) {
+    _last_error = Error::InvalidArgument;
+    return false;
+  }
+  *value = toMicrotesla(raw);
+  return true;
+}
+
 bool MMC5983MA::readMagneticOffsetCancelled(float* x, float* y, float* z) {
+  _last_error = Error::None;
   setCoil();
   if (!triggerMagneticAndWait()) {
     return false;
@@ -281,10 +283,45 @@ bool MMC5983MA::readMagneticOffsetCancelled(float* x, float* y, float* z) {
 }
 
 // ---------------------------------------------------------------------------
+// Magnetic measurement -- async
+// ---------------------------------------------------------------------------
+
+bool MMC5983MA::triggerSingleShotRead() {
+  _last_error = Error::None;
+  if (_ctrl2_shadow & reg::CTRL2_CMM_EN) {
+    // Continuous mode is already self-triggering. No-op, succeeds.
+    return true;
+  }
+  setCoil();
+  if (!writeRegister(reg::REG_STATUS, reg::STATUS_MEAS_M_DONE)) {
+    return false;
+  }
+  return writeRegister(reg::REG_INT_CTRL_0,
+                       (uint8_t)(_ctrl0_shadow | reg::CTRL0_TM_M));
+}
+
+bool MMC5983MA::readLatestMagneticRaw(uint32_t* x, uint32_t* y, uint32_t* z) {
+  _last_error = Error::None;
+  return readRawXYZ(x, y, z);
+}
+
+bool MMC5983MA::readLatestMagneticUT(float* x, float* y, float* z) {
+  uint32_t rx, ry, rz;
+  if (!readLatestMagneticRaw(&rx, &ry, &rz)) {
+    return false;
+  }
+  *x = toMicrotesla(rx);
+  *y = toMicrotesla(ry);
+  *z = toMicrotesla(rz);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Temperature
 // ---------------------------------------------------------------------------
 
 float MMC5983MA::readTemperatureC() {
+  _last_error = Error::None;
   if (!writeRegister(reg::REG_STATUS, reg::STATUS_MEAS_T_DONE)) {
     return NAN;
   }
@@ -308,6 +345,7 @@ float MMC5983MA::readTemperatureC() {
     }
     delay(reg::MEAS_POLL_INTERVAL_MS);
   }
+  _last_error = Error::MeasurementTimeout;
   return NAN;
 }
 
@@ -316,18 +354,21 @@ float MMC5983MA::readTemperatureC() {
 // ---------------------------------------------------------------------------
 
 void MMC5983MA::setCoil() {
+  _last_error = Error::None;
   writeRegister(reg::REG_INT_CTRL_0,
                 (uint8_t)(_ctrl0_shadow | reg::CTRL0_SET));
   delay(reg::SET_RESET_PULSE_DELAY_MS);
 }
 
 void MMC5983MA::resetCoil() {
+  _last_error = Error::None;
   writeRegister(reg::REG_INT_CTRL_0,
                 (uint8_t)(_ctrl0_shadow | reg::CTRL0_RESET));
   delay(reg::SET_RESET_PULSE_DELAY_MS);
 }
 
 void MMC5983MA::setAutomaticSetReset(bool enabled) {
+  _last_error = Error::None;
   if (enabled) {
     _ctrl0_shadow |= reg::CTRL0_AUTO_SR_EN;
   } else {
@@ -341,13 +382,16 @@ void MMC5983MA::setAutomaticSetReset(bool enabled) {
 // ---------------------------------------------------------------------------
 
 bool MMC5983MA::setBandwidth(uint16_t hz) {
+  _last_error = Error::None;
   uint8_t code;
   switch (hz) {
     case 100: code = reg::BW_100_HZ; break;
     case 200: code = reg::BW_200_HZ; break;
     case 400: code = reg::BW_400_HZ; break;
     case 800: code = reg::BW_800_HZ; break;
-    default:  return false;
+    default:
+      _last_error = Error::InvalidArgument;
+      return false;
   }
   _bandwidth_code = code;
   _ctrl1_shadow = (uint8_t)((_ctrl1_shadow & ~reg::CTRL1_BW_MASK) | code);
@@ -364,6 +408,7 @@ uint16_t MMC5983MA::getBandwidth() const {
 }
 
 bool MMC5983MA::startContinuousMode(uint16_t rate_hz, bool automatic_set_reset) {
+  _last_error = Error::None;
   uint8_t freq_code;
   switch (rate_hz) {
     case 1:    freq_code = reg::CM_FREQ_1_HZ; break;
@@ -373,7 +418,9 @@ bool MMC5983MA::startContinuousMode(uint16_t rate_hz, bool automatic_set_reset) 
     case 100:  freq_code = reg::CM_FREQ_100_HZ; break;
     case 200:  freq_code = reg::CM_FREQ_200_HZ; break;
     case 1000: freq_code = reg::CM_FREQ_1000_HZ; break;
-    default:   return false;
+    default:
+      _last_error = Error::InvalidArgument;
+      return false;
   }
 
   // Promote bandwidth automatically when the rate requires it.
@@ -412,10 +459,12 @@ bool MMC5983MA::startContinuousMode(uint16_t rate_hz, bool automatic_set_reset) 
     }
     delay(reg::MEAS_POLL_INTERVAL_MS);
   }
+  _last_error = Error::MeasurementTimeout;
   return false;
 }
 
 void MMC5983MA::stopContinuousMode() {
+  _last_error = Error::None;
   _ctrl2_shadow = (uint8_t)(_ctrl2_shadow
                             & ~(reg::CTRL2_CMM_EN | reg::CTRL2_CM_FREQ_MASK));
   writeRegister(reg::REG_INT_CTRL_2, _ctrl2_shadow);
@@ -426,6 +475,7 @@ bool MMC5983MA::isContinuousModeEnabled() const {
 }
 
 bool MMC5983MA::isDataReady() {
+  _last_error = Error::None;
   uint8_t status;
   if (!readRegister(reg::REG_STATUS, &status)) {
     return false;
@@ -434,10 +484,43 @@ bool MMC5983MA::isDataReady() {
 }
 
 // ---------------------------------------------------------------------------
+// Channel enables
+// ---------------------------------------------------------------------------
+
+void MMC5983MA::setXEnabled(bool enabled) {
+  _last_error = Error::None;
+  if (enabled) {
+    _ctrl1_shadow = (uint8_t)(_ctrl1_shadow & ~reg::CTRL1_X_INHIBIT);
+  } else {
+    _ctrl1_shadow |= reg::CTRL1_X_INHIBIT;
+  }
+  writeRegister(reg::REG_INT_CTRL_1, _ctrl1_shadow);
+}
+
+bool MMC5983MA::isXEnabled() const {
+  return (_ctrl1_shadow & reg::CTRL1_X_INHIBIT) == 0;
+}
+
+void MMC5983MA::setYZEnabled(bool enabled) {
+  _last_error = Error::None;
+  if (enabled) {
+    _ctrl1_shadow = (uint8_t)(_ctrl1_shadow & ~reg::CTRL1_YZ_INHIBIT);
+  } else {
+    _ctrl1_shadow |= reg::CTRL1_YZ_INHIBIT;
+  }
+  writeRegister(reg::REG_INT_CTRL_1, _ctrl1_shadow);
+}
+
+bool MMC5983MA::isYZEnabled() const {
+  return (_ctrl1_shadow & reg::CTRL1_YZ_INHIBIT) == 0;
+}
+
+// ---------------------------------------------------------------------------
 // Periodic SET
 // ---------------------------------------------------------------------------
 
 bool MMC5983MA::setPeriodicSet(uint16_t sample_count) {
+  _last_error = Error::None;
   uint8_t code;
   switch (sample_count) {
     case 1:    code = reg::PRD_SET_1; break;
@@ -448,7 +531,9 @@ bool MMC5983MA::setPeriodicSet(uint16_t sample_count) {
     case 500:  code = reg::PRD_SET_500; break;
     case 1000: code = reg::PRD_SET_1000; break;
     case 2000: code = reg::PRD_SET_2000; break;
-    default:   return false;
+    default:
+      _last_error = Error::InvalidArgument;
+      return false;
   }
   _ctrl2_shadow = (uint8_t)((_ctrl2_shadow & ~reg::CTRL2_PRD_SET_MASK)
                             | (code << reg::CTRL2_PRD_SET_SHIFT)
@@ -457,6 +542,7 @@ bool MMC5983MA::setPeriodicSet(uint16_t sample_count) {
 }
 
 void MMC5983MA::disablePeriodicSet() {
+  _last_error = Error::None;
   _ctrl2_shadow = (uint8_t)(_ctrl2_shadow
                             & ~(reg::CTRL2_EN_PRD_SET | reg::CTRL2_PRD_SET_MASK));
   writeRegister(reg::REG_INT_CTRL_2, _ctrl2_shadow);
@@ -467,6 +553,7 @@ void MMC5983MA::disablePeriodicSet() {
 // ---------------------------------------------------------------------------
 
 void MMC5983MA::setInterruptEnabled(bool enabled) {
+  _last_error = Error::None;
   if (enabled) {
     _ctrl0_shadow |= reg::CTRL0_INT_MEAS_DONE_EN;
   } else {
@@ -475,11 +562,22 @@ void MMC5983MA::setInterruptEnabled(bool enabled) {
   writeRegister(reg::REG_INT_CTRL_0, _ctrl0_shadow);
 }
 
+void MMC5983MA::setInterruptDataReadyPin(uint8_t pin, void (*callback)()) {
+  _last_error = Error::None;
+  pinMode(pin, INPUT);
+  if (callback != nullptr) {
+    attachInterrupt(digitalPinToInterrupt(pin), callback, RISING);
+  }
+  setInterruptEnabled(true);
+}
+
 void MMC5983MA::clearInterrupt(uint8_t mask) {
+  _last_error = Error::None;
   writeRegister(reg::REG_STATUS, mask);
 }
 
 void MMC5983MA::setSpi3Wire(bool enabled) {
+  _last_error = Error::None;
   if (enabled) {
     _ctrl3_shadow |= reg::CTRL3_SPI_3W;
   } else {
@@ -493,6 +591,7 @@ void MMC5983MA::setSpi3Wire(bool enabled) {
 // ---------------------------------------------------------------------------
 
 bool MMC5983MA::runSelftest() {
+  _last_error = Error::None;
   // Establish a known SET-conditioned baseline. Discarded (used only to
   // place the chip in a known state) before the ST_ENP/ST_ENM swing.
   setCoil();
