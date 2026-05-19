@@ -18,6 +18,12 @@ with the sensor on the STEMMA QT bus. Bring-up reads the expected Earth
 field (|B| ≈ 47 µT), self-test passes, and a 10-second continuous-mode
 stress run shows |B| variation within 0.22 µT.
 
+> **Contributing or releasing the Arduino library?** Read
+> [`arduino/docs/TESTING.md`](arduino/docs/TESTING.md) first. It covers
+> the CI checks that run on every PR, the local compile commands, and
+> the `Verify020.ino` hardware bench test that must pass before tagging
+> a release.
+
 ## Sensor at a glance
 
 - **Resolution:** 18-bit (0.0625 mG / LSB nominal)
@@ -131,10 +137,54 @@ REPL automatically over USB serial and capture the output.
 
 ## Installation
 
-Per-platform installation steps live in the platform's `docs/INSTALL.md`:
+### CircuitPython
 
-- CircuitPython on Feather RP2040 — [`circuitpython/docs/INSTALL.md`](circuitpython/docs/INSTALL.md)
-- Arduino on Feather RP2040 — [`arduino/docs/INSTALL.md`](arduino/docs/INSTALL.md)
+1. Flash CircuitPython 8.x or newer to your board.
+2. Copy `circuitpython/mmc5983ma/` to `CIRCUITPY/lib/` so you end up
+   with `CIRCUITPY/lib/mmc5983ma/__init__.py` and
+   `CIRCUITPY/lib/mmc5983ma/registers.py`.
+3. Copy any sketch from `circuitpython/examples/` to `CIRCUITPY/` as
+   `code.py`.
+
+Full wiring tables and a Feather RP2040–specific walkthrough are in
+[`circuitpython/docs/INSTALL.md`](circuitpython/docs/INSTALL.md).
+
+### Arduino
+
+Pick one of the three install paths below. After install, restart the
+Arduino IDE and the examples appear under
+**File → Examples → MMC5983MA**.
+
+**A. Arduino IDE — manual copy** (works today, no Library Manager
+listing required):
+
+1. Clone or download this repo.
+2. Copy the entire `arduino/` directory into your Arduino libraries
+   folder and rename it to `MMC5983MA`:
+   - Windows: `%USERPROFILE%\Documents\Arduino\libraries\MMC5983MA\`
+   - macOS: `~/Documents/Arduino/libraries/MMC5983MA/`
+   - Linux: `~/Arduino/libraries/MMC5983MA/`
+3. Restart the Arduino IDE.
+
+**B. `arduino-cli` from this repo:**
+
+```bash
+arduino-cli lib install --git-url https://github.com/yassinebkr/MMC5983MA.git
+```
+
+**C. Arduino Library Manager** (after the library is listed in the
+registry — current registration state is in
+[`arduino/library.properties`](arduino/library.properties)):
+
+- IDE: **Tools → Manage Libraries** → search `MMC5983MA` → Install
+- CLI: `arduino-cli lib install MMC5983MA`
+
+You also need an Arduino core for your board. On the Feather RP2040
+RFM95 that's the
+[Earle Philhower arduino-pico core](https://github.com/earlephilhower/arduino-pico)
+(`rp2040:rp2040:adafruit_feather_rfm`). Full board-core install steps,
+I²C and SPI wiring tables, and a first-run checklist are in
+[`arduino/docs/INSTALL.md`](arduino/docs/INSTALL.md).
 
 ## API reference
 
