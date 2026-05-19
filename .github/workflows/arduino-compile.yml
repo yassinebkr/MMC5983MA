@@ -1,0 +1,55 @@
+name: Arduino — compile examples
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'arduino/**'
+      - '.github/workflows/arduino-compile.yml'
+  pull_request:
+    paths:
+      - 'arduino/**'
+      - '.github/workflows/arduino-compile.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    name: Compile on ${{ matrix.fqbn }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fqbn:
+          - rp2040:rp2040:adafruit_feather_rfm
+          - arduino:avr:uno
+          - esp32:esp32:esp32
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Compile examples
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: ${{ matrix.fqbn }}
+          platforms: |
+            - name: arduino:avr
+            - name: rp2040:rp2040
+              source-url: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+            - name: esp32:esp32
+              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          sketch-paths: |
+            - arduino/examples/BasicI2C
+            - arduino/examples/BasicSPI
+            - arduino/examples/Selftest
+            - arduino/examples/ContinuousMode
+            - arduino/examples/Calibration
+            - arduino/examples/HeadingCompass
+            - arduino/examples/InterruptDriven
+            - arduino/examples/AsyncRead
+          libraries: |
+            - source-path: ./arduino
+          enable-warnings-report: true
+          cli-compile-flags: |
+            - --warnings
+            - all
