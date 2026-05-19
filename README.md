@@ -28,7 +28,9 @@ stress run shows |B| variation within 0.22 µT.
   temperature sensor, programmable bandwidth filter, periodic SET, built-in
   self-test, automatic SET/RESET.
 
-## Quickstart (CircuitPython, I²C)
+## Quickstart — I²C
+
+### CircuitPython
 
 ```python
 import board
@@ -42,10 +44,41 @@ x, y, z = mag.magnetic
 print(f"X={x:+.2f} µT  Y={y:+.2f} µT  Z={z:+.2f} µT")
 ```
 
-See [`circuitpython/examples/`](circuitpython/examples/) for SPI, continuous
-mode, calibration, self-test, compass-heading, and a comprehensive
-[`hardware_bringup.py`](circuitpython/examples/hardware_bringup.py) that
-exercises every public path in one run.
+### Arduino
+
+```cpp
+#include <Wire.h>
+#include <MMC5983MA.h>
+
+MMC5983MA mag(Wire);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  mag.begin();
+}
+
+void loop() {
+  float x, y, z;
+  if (mag.readMagneticUT(&x, &y, &z)) {
+    Serial.print("X=");  Serial.print(x, 2);
+    Serial.print(" Y="); Serial.print(y, 2);
+    Serial.print(" Z="); Serial.print(z, 2);
+    Serial.println(" uT");
+  }
+  delay(100);
+}
+```
+
+### Browse more examples
+
+- CircuitPython — [`circuitpython/examples/`](circuitpython/examples/) covers
+  SPI, continuous mode, calibration, self-test, compass-heading, and a
+  comprehensive [`hardware_bringup.py`](circuitpython/examples/hardware_bringup.py)
+  that exercises every public path in one run.
+- Arduino — [`arduino/examples/`](arduino/examples/) ships `BasicI2C`,
+  `BasicSPI`, `Selftest`, `ContinuousMode`, `Calibration`, and
+  `HeadingCompass` (each in its own folder for the Arduino IDE).
 
 ## Repository layout
 
@@ -58,6 +91,12 @@ exercises every public path in one run.
 │   │   └── registers.py  addresses, bit fields, timing constants
 │   ├── examples/         basic_i2c, basic_spi, continuous_mode, calibration,
 │   │                     selftest, heading_calculation, hardware_bringup
+│   └── docs/             INSTALL.md, API_REFERENCE.md
+├── arduino/              Arduino library (Arduino Library Manager layout)
+│   ├── library.properties, keywords.txt
+│   ├── src/              MMC5983MA.h, MMC5983MA.cpp, MMC5983MA_Registers.h
+│   ├── examples/         BasicI2C, BasicSPI, Selftest, ContinuousMode,
+│   │                     Calibration, HeadingCompass
 │   └── docs/             INSTALL.md, API_REFERENCE.md
 ├── tests/                pytest unit tests (run on CPython, not deployed)
 │   ├── conftest.py       MockI2C fixture emulating the chip's register set
@@ -92,13 +131,15 @@ REPL automatically over USB serial and capture the output.
 
 ## Installation
 
-Per-platform installation steps live in the platform's `docs/INSTALL.md`. For
-CircuitPython on a Feather RP2040, see
-[`circuitpython/docs/INSTALL.md`](circuitpython/docs/INSTALL.md).
+Per-platform installation steps live in the platform's `docs/INSTALL.md`:
+
+- CircuitPython on Feather RP2040 — [`circuitpython/docs/INSTALL.md`](circuitpython/docs/INSTALL.md)
+- Arduino on Feather RP2040 — [`arduino/docs/INSTALL.md`](arduino/docs/INSTALL.md)
 
 ## API reference
 
-See [`circuitpython/docs/API_REFERENCE.md`](circuitpython/docs/API_REFERENCE.md).
+- CircuitPython — [`circuitpython/docs/API_REFERENCE.md`](circuitpython/docs/API_REFERENCE.md)
+- Arduino — [`arduino/docs/API_REFERENCE.md`](arduino/docs/API_REFERENCE.md)
 
 ## Design notes
 
