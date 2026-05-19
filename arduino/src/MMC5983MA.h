@@ -11,7 +11,12 @@
 // - The 7-byte magnetic data buffer is pre-allocated as a class member so
 //   the hot path performs no heap allocations.
 // - Public reads return bool and write results via pointer arguments so a
-//   bus failure or measurement timeout is visible to the caller.
+//   bus failure or measurement timeout is visible to the caller; a more
+//   specific reason is available via lastError().
+// - The three bus-abstraction methods (readRegister, readBurst,
+//   writeRegister) are defined inline at the bottom of this header so the
+//   compiler can inline them into the rest of the driver, with no .cpp
+//   call boundary in the hot path.
 // - Mirrors the hardware-validated CircuitPython port at
 //   ../../circuitpython/mmc5983ma/__init__.py.
 
@@ -26,6 +31,27 @@
 
 class MMC5983MA {
  public:
+  // Reason the last public call failed. None when the most recent call
+  // succeeded. Sticky between calls: query immediately after a false
+  // (or NAN) return.
+  enum class Error : uint8_t {
+    None = 0,
+    BusTimeout,           // I2C / SPI transaction timed out at the bus layer
+    BusNack,              // I2C slave NACKed an address or data byte
+    IdMismatch,           // PROD_ID register did not return the expected value
+    MeasurementTimeout,   // status MEAS_M_DONE never asserted within the window
+    InvalidArgument,      // out-of-range argument (bandwidth, rate, axis, ...)
+  };
+
+  // Identifies one of the three magnetic-field axes, for the per-axis read
+  // helpers. The integer value matches the order the chip emits in its
+  // data registers (X=0, Y=1, Z=2).
+  enum class Axis : uint8_t {
+    X = 0,
+    Y = 1,
+    Z = 2,
+  };
+
   // Construct an I2C-backed driver. The TwoWire instance must already be
   // begin()'d before begin() is called on the driver.
   explicit MMC5983MA(TwoWire& wire = Wire, uint8_t address = mmc5983ma::I2C_ADDRESS);
@@ -35,8 +61,18 @@ class MMC5983MA {
   // as an output and driven high in begin(). Datasheet allows up to 10 MHz.
   MMC5983MA(SPIClass& spi, uint8_t cs_pin, uint32_t spi_clock_hz = 8000000UL);
 
+  // Construct an SPI-backed driver with a fully custom SPISettings (mode,
+  // bit order, clock). Useful when sharing the bus with peripherals that
+  // need a different mode.
+  MMC5983MA(SPIClass& spi, uint8_t cs_pin, SPISettings settings);
+
+  // Replace the SPISettings used for every SPI transaction. No effect on
+  // an I2C-backed instance.
+  void setSpiSettings(SPISettings settings);
+
   // Verify the product ID and issue a software reset. Returns true on
-  // success; false if the bus is unresponsive or PROD_ID does not match.
+  // success; false if the bus is unresponsive or PROD_ID does not match
+  // (check lastError() to distinguish).
   bool begin();
 
   // True iff the chip responds with the expected PROD_ID.
@@ -46,8 +82,11 @@ class MMC5983MA {
   // Also clears the host-side shadow state so it matches the device.
   void reset();
 
+  // Reason the last public call failed, or Error::None if it succeeded.
+  Error lastError() const { return _last_error; }
+
   // --------------------------------------------------------------------
-  // Magnetic measurement
+  // Magnetic measurement -- synchronous (all in one call)
   // --------------------------------------------------------------------
 
   // Read the magnetic field in microtesla. In single-shot mode this fires
@@ -59,6 +98,12 @@ class MMC5983MA {
   // Same as readMagneticUT but returns the raw 18-bit unsigned counts.
   bool readMagneticRaw(uint32_t* x, uint32_t* y, uint32_t* z);
 
+  // Read one axis only. Does a full 7-byte burst under the hood because
+  // the chip packs all three axes' LSBs into the shared XYZ_OUT_2
+  // register, so this is API convenience, not a bandwidth saving.
+  bool readMagneticAxisUT(Axis axis, float* value);
+  bool readMagneticAxisRaw(Axis axis, uint32_t* value);
+
   // Offset-cancelled read: takes a SET measurement and a RESET measurement,
   // returns (M_set - M_reset) / 2 per axis in microtesla. Cancels the slow
   // internal offset drift that is the dominant systematic error in this
@@ -68,6 +113,25 @@ class MMC5983MA {
   // Die temperature in degrees Celsius. Always single-shot. Returns NAN
   // on bus failure or measurement timeout.
   float readTemperatureC();
+
+  // --------------------------------------------------------------------
+  // Magnetic measurement -- async (split trigger / read)
+  // --------------------------------------------------------------------
+
+  // Fire a SET pulse and trigger a single-shot magnetic measurement,
+  // returning immediately. The caller is responsible for polling
+  // isDataReady() (or wiring INT, see setInterruptDataReadyPin) before
+  // calling readLatestMagneticUT / readLatestMagneticRaw. Useful for
+  // interleaving the magnetometer's measurement window with other work
+  // (e.g. reading an IMU on a parallel bus). Has no effect when the chip
+  // is in continuous mode (the chip is already triggering itself).
+  bool triggerSingleShotRead();
+
+  // Read the current contents of the data registers without triggering a
+  // new measurement. Pairs with triggerSingleShotRead, or with continuous
+  // mode where the chip refreshes the data registers on its own schedule.
+  bool readLatestMagneticUT(float* x, float* y, float* z);
+  bool readLatestMagneticRaw(uint32_t* x, uint32_t* y, uint32_t* z);
 
   // --------------------------------------------------------------------
   // SET / RESET coil control
@@ -115,6 +179,20 @@ class MMC5983MA {
   bool isDataReady();
 
   // --------------------------------------------------------------------
+  // Channel enables (power / time saver)
+  // --------------------------------------------------------------------
+
+  // Enable / disable the X channel. A disabled channel does not consume
+  // measurement time or power. Default is enabled.
+  void setXEnabled(bool enabled);
+  bool isXEnabled() const;
+
+  // Enable / disable the Y and Z channels (they share an inhibit bit
+  // pair in the chip, so they toggle together). Default is enabled.
+  void setYZEnabled(bool enabled);
+  bool isYZEnabled() const;
+
+  // --------------------------------------------------------------------
   // Periodic SET
   // --------------------------------------------------------------------
 
@@ -130,8 +208,17 @@ class MMC5983MA {
   // Interrupts and SPI mode
   // --------------------------------------------------------------------
 
-  // Enable/disable the INT pin asserting on measurement-done.
+  // Enable/disable the INT pin asserting on measurement-done. Configures
+  // only the chip side; wire your own attachInterrupt() on the host, or
+  // call setInterruptDataReadyPin below to do both at once.
   void setInterruptEnabled(bool enabled);
+
+  // Configure the host GPIO connected to the chip's INT pin and attach
+  // a user-supplied callback (typically a function that sets a volatile
+  // flag the main loop polls). Enables the chip's INT pin as a side
+  // effect. Use clearInterrupt() in or after the callback to allow the
+  // chip to fire INT again.
+  void setInterruptDataReadyPin(uint8_t pin, void (*callback)());
 
   // Clear the named status flags by writing 1s to them. Defaults to
   // clearing both magnetic and temperature data-ready flags.
@@ -153,12 +240,6 @@ class MMC5983MA {
   bool runSelftest();
 
  private:
-  // ----- Bus abstraction (real implementations in MMC5983MA.cpp) ---------
-
-  bool readRegister(uint8_t address, uint8_t* value);
-  bool readBurst(uint8_t address, uint8_t* buffer, size_t length);
-  bool writeRegister(uint8_t address, uint8_t value);
-
   // ----- Internal helpers ------------------------------------------------
 
   bool triggerMagneticAndWait();
@@ -170,13 +251,13 @@ class MMC5983MA {
 
   // Exactly one of _wire / _spi is non-null. _wire selects I2C, _spi
   // selects SPI.
-  TwoWire*  _wire;
-  SPIClass* _spi;
-  uint8_t   _i2c_address;
-  uint8_t   _cs_pin;
-  uint32_t  _spi_clock_hz;
+  TwoWire*    _wire;
+  SPIClass*   _spi;
+  uint8_t     _i2c_address;
+  uint8_t     _cs_pin;
+  SPISettings _spi_settings;
 
-  // ----- Shadow registers and pre-allocated buffer -----------------------
+  // ----- Shadow registers, pre-allocated buffer, last error --------------
 
   uint8_t _magBuf[7];
   uint8_t _ctrl0_shadow;
@@ -184,6 +265,82 @@ class MMC5983MA {
   uint8_t _ctrl2_shadow;
   uint8_t _ctrl3_shadow;
   uint8_t _bandwidth_code;
+  Error   _last_error;
+
+  // ----- Inline bus abstraction (see header comment) ---------------------
+
+  inline bool readRegister(uint8_t address, uint8_t* value) {
+    if (_wire != nullptr) {
+      _wire->beginTransmission(_i2c_address);
+      _wire->write(address);
+      if (_wire->endTransmission(false) != 0) {
+        _last_error = Error::BusNack;
+        return false;
+      }
+      if (_wire->requestFrom((uint8_t)_i2c_address, (uint8_t)1) != 1) {
+        _last_error = Error::BusTimeout;
+        return false;
+      }
+      *value = _wire->read();
+      return true;
+    }
+    _spi->beginTransaction(_spi_settings);
+    digitalWrite(_cs_pin, LOW);
+    _spi->transfer((uint8_t)(address | mmc5983ma::SPI_READ));
+    *value = _spi->transfer(0x00);
+    digitalWrite(_cs_pin, HIGH);
+    _spi->endTransaction();
+    return true;
+  }
+
+  inline bool readBurst(uint8_t address, uint8_t* buffer, size_t length) {
+    if (_wire != nullptr) {
+      _wire->beginTransmission(_i2c_address);
+      _wire->write(address);
+      if (_wire->endTransmission(false) != 0) {
+        _last_error = Error::BusNack;
+        return false;
+      }
+      size_t got = _wire->requestFrom((uint8_t)_i2c_address, (uint8_t)length);
+      if (got != length) {
+        _last_error = Error::BusTimeout;
+        return false;
+      }
+      for (size_t i = 0; i < length; ++i) {
+        buffer[i] = _wire->read();
+      }
+      return true;
+    }
+    _spi->beginTransaction(_spi_settings);
+    digitalWrite(_cs_pin, LOW);
+    _spi->transfer((uint8_t)(address | mmc5983ma::SPI_READ));
+    for (size_t i = 0; i < length; ++i) {
+      buffer[i] = _spi->transfer(0x00);
+    }
+    digitalWrite(_cs_pin, HIGH);
+    _spi->endTransaction();
+    return true;
+  }
+
+  inline bool writeRegister(uint8_t address, uint8_t value) {
+    if (_wire != nullptr) {
+      _wire->beginTransmission(_i2c_address);
+      _wire->write(address);
+      _wire->write(value);
+      if (_wire->endTransmission() != 0) {
+        _last_error = Error::BusNack;
+        return false;
+      }
+      return true;
+    }
+    _spi->beginTransaction(_spi_settings);
+    digitalWrite(_cs_pin, LOW);
+    _spi->transfer((uint8_t)(address & 0x7F));
+    _spi->transfer(value);
+    digitalWrite(_cs_pin, HIGH);
+    _spi->endTransaction();
+    return true;
+  }
 };
 
 #endif  // MMC5983MA_H

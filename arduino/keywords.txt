@@ -7,6 +7,8 @@
 #######################################
 
 MMC5983MA	KEYWORD1
+Axis	KEYWORD1
+Error	KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
@@ -15,10 +17,16 @@ MMC5983MA	KEYWORD1
 begin	KEYWORD2
 isConnected	KEYWORD2
 reset	KEYWORD2
+lastError	KEYWORD2
 readMagneticUT	KEYWORD2
 readMagneticRaw	KEYWORD2
+readMagneticAxisUT	KEYWORD2
+readMagneticAxisRaw	KEYWORD2
 readMagneticOffsetCancelled	KEYWORD2
 readTemperatureC	KEYWORD2
+triggerSingleShotRead	KEYWORD2
+readLatestMagneticUT	KEYWORD2
+readLatestMagneticRaw	KEYWORD2
 setCoil	KEYWORD2
 resetCoil	KEYWORD2
 setAutomaticSetReset	KEYWORD2
@@ -28,12 +36,18 @@ startContinuousMode	KEYWORD2
 stopContinuousMode	KEYWORD2
 isContinuousModeEnabled	KEYWORD2
 isDataReady	KEYWORD2
+setXEnabled	KEYWORD2
+isXEnabled	KEYWORD2
+setYZEnabled	KEYWORD2
+isYZEnabled	KEYWORD2
 runSelftest	KEYWORD2
 clearInterrupt	KEYWORD2
 setPeriodicSet	KEYWORD2
 disablePeriodicSet	KEYWORD2
 setInterruptEnabled	KEYWORD2
+setInterruptDataReadyPin	KEYWORD2
 setSpi3Wire	KEYWORD2
+setSpiSettings	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)
@@ -41,3 +55,12 @@ setSpi3Wire	KEYWORD2
 
 MMC5983MA_I2C_ADDRESS	LITERAL1
 MMC5983MA_PROD_ID	LITERAL1
+None	LITERAL1
+BusTimeout	LITERAL1
+BusNack	LITERAL1
+IdMismatch	LITERAL1
+MeasurementTimeout	LITERAL1
+InvalidArgument	LITERAL1
+X	LITERAL1
+Y	LITERAL1
+Z	LITERAL1
