@@ -6,11 +6,11 @@ magnetometer with 18-bit resolution and ±8 gauss full-scale range.
 
 This repository hosts implementations for several embedded targets:
 
-| Platform      | Status               | Path             |
-|---------------|----------------------|------------------|
-| CircuitPython | Hardware-validated   | `circuitpython/` |
-| MicroPython   | Coming soon          | `micropython/`   |
-| Arduino       | Coming soon          | `arduino/`       |
+| Platform      | Status                                          | Path             |
+|---------------|-------------------------------------------------|------------------|
+| CircuitPython | Hardware-validated                              | `circuitpython/` |
+| MicroPython   | Coming soon                                     | `micropython/`   |
+| Arduino       | I2C hardware-validated; SPI compile-only        | `arduino/`       |
 
 The CircuitPython driver was developed and validated on an
 [Adafruit Feather RP2040 with RFM95 LoRa Radio](https://www.adafruit.com/product/5714)
