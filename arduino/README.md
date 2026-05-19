@@ -75,16 +75,38 @@ void loop() {
 
 ## Examples
 
-| Example          | Bus | What it does                                            |
-|------------------|-----|---------------------------------------------------------|
-| `BasicI2C`       | I2C | Single-shot reads at 10 Hz with self-test on startup    |
-| `BasicSPI`       | SPI | Same as `BasicI2C` over SPI                             |
-| `Selftest`       | I2C | Run the on-die saturation self-test and print verdict   |
-| `ContinuousMode` | I2C | Stream 100 Hz with automatic SET/RESET for 30 s         |
-| `Calibration`    | I2C | Collect hard-iron offsets while rotating the sensor     |
-| `HeadingCompass` | I2C | 2D compass heading from the X/Y components              |
+| Example            | Bus | What it does                                                  |
+|--------------------|-----|---------------------------------------------------------------|
+| `BasicI2C`         | I2C | Single-shot reads at 10 Hz with self-test on startup          |
+| `BasicSPI`         | SPI | Same as `BasicI2C` over SPI                                   |
+| `Selftest`         | I2C | Run the on-die saturation self-test and print verdict         |
+| `ContinuousMode`   | I2C | Stream 100 Hz with automatic SET/RESET for 30 s               |
+| `Calibration`      | I2C | Collect hard-iron offsets while rotating the sensor           |
+| `HeadingCompass`   | I2C | 2D compass heading from the X/Y components                   |
+| `InterruptDriven`  | I2C | INT-pin-driven reads using the chip's MEAS_DONE interrupt     |
+| `AsyncRead`        | I2C | Async trigger / wait / read so the CPU can do other work      |
 
 Open them from **File → Examples → MMC5983MA** in the Arduino IDE.
+
+## What's in 0.2.0
+
+- `lastError()` returns a `MMC5983MA::Error` enum after any false / NAN
+  return, so you can distinguish `BusNack`, `BusTimeout`,
+  `MeasurementTimeout`, `IdMismatch`, and `InvalidArgument`.
+- Async trigger / read API: `triggerSingleShotRead()` +
+  `readLatestMagneticUT/Raw()` so the CPU is free during the chip's
+  measurement window.
+- Per-axis reads: `readMagneticAxisUT(Axis::X, &value)` and
+  `readMagneticAxisRaw`.
+- Per-channel power saving: `setXEnabled(bool)` and `setYZEnabled(bool)`.
+- `MMC5983MA(SPIClass&, cs, SPISettings)` constructor and
+  `setSpiSettings()` setter for full control over SPI mode / bit order /
+  clock when sharing the bus with peripherals.
+- `setInterruptDataReadyPin(pin, callback)` configures both the chip's
+  INT pin and the host-side `attachInterrupt()` in one call.
+- Hot-path bus methods (`readRegister` / `readBurst` / `writeRegister`)
+  are now `inline` in the header so the compiler can fold them into the
+  rest of the driver with no call boundary.
 
 ## Installation
 

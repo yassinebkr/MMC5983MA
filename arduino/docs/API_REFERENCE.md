@@ -1,5 +1,24 @@
 # API reference — `MMC5983MA`
 
+## Nested types
+
+### `enum class MMC5983MA::Error : uint8_t`
+
+Reason the last public call failed. See `lastError()`. Values:
+
+| Value                  | Meaning                                                    |
+|------------------------|------------------------------------------------------------|
+| `None`                 | Most recent call succeeded.                                |
+| `BusTimeout`           | I2C or SPI transaction did not return the expected bytes.  |
+| `BusNack`              | I2C slave NACKed an address or data byte.                  |
+| `IdMismatch`           | `REG_PROD_ID` did not return the expected `0x30`.          |
+| `MeasurementTimeout`   | `STATUS.MEAS_M_DONE` never asserted within the BW window.  |
+| `InvalidArgument`      | Out-of-range argument (bandwidth, rate, axis enum, …).     |
+
+### `enum class MMC5983MA::Axis : uint8_t`
+
+`X = 0`, `Y = 1`, `Z = 2`. Used by `readMagneticAxisUT/Raw`.
+
 ## Constructors
 
 ### `MMC5983MA(TwoWire& wire = Wire, uint8_t address = 0x30)`
@@ -11,14 +30,26 @@ I2C-backed driver. `wire` must already be `begin()`'d before
 
 SPI-backed driver. `spi` must already be `begin()`'d. `cs_pin` is
 configured as an output and driven HIGH in `begin()`. The datasheet allows
-clocks up to 10 MHz.
+clocks up to 10 MHz. SPI mode defaults to `SPI_MODE0`, MSB first.
+
+### `MMC5983MA(SPIClass& spi, uint8_t cs_pin, SPISettings settings)`
+
+Same as the previous SPI constructor but accepts a fully custom
+`SPISettings` for non-default mode / bit order / clock. Useful when
+sharing the SPI bus with peripherals that need a different mode.
+
+### `void setSpiSettings(SPISettings settings)`
+
+Replace the `SPISettings` used for every subsequent SPI transaction. No
+effect on an I2C-backed instance.
 
 ## Lifecycle
 
 ### `bool begin()`
 
 Verifies the product ID and issues a software reset. Returns `false` if
-the bus is unresponsive or the chip's PROD_ID does not match.
+the bus is unresponsive or the chip's PROD_ID does not match. Check
+`lastError()` to distinguish `BusNack` / `BusTimeout` from `IdMismatch`.
 
 ### `bool isConnected()`
 
@@ -28,6 +59,13 @@ the bus is unresponsive or the chip's PROD_ID does not match.
 
 Software reset. Blocks ~15 ms while the chip restores defaults, then
 clears the driver's shadow state so it matches the device.
+
+### `Error lastError() const`
+
+Reason the most recent public call failed, or `Error::None` if it
+succeeded. Every public method that touches the bus clears this on
+entry and sets it on the failure path, so it always reflects the last
+call's outcome. Query immediately after a `false` (or `NAN`) return.
 
 ## Magnetic measurement
 
@@ -43,12 +81,37 @@ on bus failure or measurement timeout.
 Raw 18-bit unsigned values (`0..0x3FFFF`). `0x20000` is zero field.
 Returns `false` on the same failure modes as `readMagneticUT`.
 
+### `bool readMagneticAxisUT(Axis axis, float* value)` / `bool readMagneticAxisRaw(Axis axis, uint32_t* value)`
+
+Read one axis only. Does a full 7-byte burst under the hood because the
+chip packs all three axes' LSBs into the shared `XYZ_OUT_2` register,
+so this is API convenience, not a bandwidth saving.
+
 ### `bool readMagneticOffsetCancelled(float* x, float* y, float* z)`
 
 Takes a SET measurement and a RESET measurement, returns
 `(M_set - M_reset) / 2` per axis in microtesla. Cancels the slow internal
 offset drift that is the dominant systematic error in this part, at the
 cost of two measurement cycles per sample.
+
+## Async magnetic measurement
+
+Split the synchronous single-shot read into a non-blocking trigger and a
+later read, so the CPU is free during the chip's ~1-10 ms measurement
+window (depending on bandwidth).
+
+### `bool triggerSingleShotRead()`
+
+Fire a SET pulse and trigger a single-shot measurement, returning
+immediately. The caller polls `isDataReady()` (or wires an INT pin and
+uses `setInterruptDataReadyPin()`) before reading. No-op and returns
+`true` when continuous mode is already enabled.
+
+### `bool readLatestMagneticUT(float* x, float* y, float* z)` / `bool readLatestMagneticRaw(uint32_t* x, uint32_t* y, uint32_t* z)`
+
+Read the current contents of the data registers without triggering a
+new measurement. Pairs with `triggerSingleShotRead()` or with continuous
+mode.
 
 ### `float readTemperatureC()`
 
@@ -93,6 +156,18 @@ Disable continuous mode and return to one-shot triggering.
 
 `true` if STATUS.MEAS_M_DONE is asserted on the chip.
 
+## Channel enables
+
+### `void setXEnabled(bool enabled)` / `bool isXEnabled() const`
+
+Enable or disable the X channel via `CTRL1_X_INHIBIT`. A disabled
+channel does not consume measurement time or power. Default is enabled.
+
+### `void setYZEnabled(bool enabled)` / `bool isYZEnabled() const`
+
+Enable or disable the Y and Z channels together. The chip has a single
+register field for both, so they toggle as a pair. Default is enabled.
+
 ## Periodic SET
 
 ### `bool setPeriodicSet(uint16_t sample_count)`
@@ -109,7 +184,24 @@ Turn off periodic SET.
 
 ### `void setInterruptEnabled(bool enabled)`
 
-Drive the `INT` pin HIGH on measurement-done.
+Drive the `INT` pin HIGH on measurement-done. Configures only the chip
+side. Use `setInterruptDataReadyPin()` to also wire the host-side
+`attachInterrupt()` in one call.
+
+### `void setInterruptDataReadyPin(uint8_t pin, void (*callback)())`
+
+Configure the host GPIO connected to the chip's INT pin and attach a
+user-supplied callback (typically a function that sets a `volatile bool`
+flag the main loop polls). Enables the chip's INT-on-done bit as a side
+effect. Call `clearInterrupt()` in or after the callback so the chip
+can fire INT again on the next sample.
+
+```cpp
+volatile bool ready = false;
+void onReady() { ready = true; }
+// ...
+mag.setInterruptDataReadyPin(A0, onReady);
+```
 
 ### `void clearInterrupt(uint8_t mask = STATUS_MEAS_M_DONE | STATUS_MEAS_T_DONE)`
 
