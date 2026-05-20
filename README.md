@@ -98,7 +98,7 @@ void loop() {
 │   ├── examples/         basic_i2c, basic_spi, continuous_mode, calibration,
 │   │                     selftest, heading_calculation, hardware_bringup
 │   └── docs/             INSTALL.md, API_REFERENCE.md
-├── arduino/              Arduino library (Arduino Library Manager layout)
+├── arduino/              Arduino library (standard Arduino layout)
 │   ├── library.properties, keywords.txt
 │   ├── src/              MMC5983MA.h, MMC5983MA.cpp, MMC5983MA_Registers.h
 │   ├── examples/         BasicI2C, BasicSPI, Selftest, ContinuousMode,
@@ -151,12 +151,11 @@ Full wiring tables and a Feather RP2040–specific walkthrough are in
 
 ### Arduino
 
-Pick one of the three install paths below. After install, restart the
+Pick one of the two install paths below. After install, restart the
 Arduino IDE and the examples appear under
 **File → Examples → MMC5983MA**.
 
-**A. Arduino IDE — manual copy** (works today, no Library Manager
-listing required):
+**A. Arduino IDE — manual copy:**
 
 1. Clone or download this repo.
 2. Copy the entire `arduino/` directory into your Arduino libraries
@@ -171,13 +170,6 @@ listing required):
 ```bash
 arduino-cli lib install --git-url https://github.com/yassinebkr/MMC5983MA.git
 ```
-
-**C. Arduino Library Manager** (after the library is listed in the
-registry — current registration state is in
-[`arduino/library.properties`](arduino/library.properties)):
-
-- IDE: **Tools → Manage Libraries** → search `MMC5983MA` → Install
-- CLI: `arduino-cli lib install MMC5983MA`
 
 You also need an Arduino core for your board. On the Feather RP2040
 RFM95 that's the

@@ -25,10 +25,11 @@ every PR that touches `arduino/` or the workflow itself:
 | `arduino:avr:uno`                   | Smallest target — catches accidental C++17-only usage.  |
 | `esp32:esp32:esp32`                 | Different toolchain — catches Wire/SPI assumptions.     |
 
-These are the same compile checks the
-[Arduino Library Manager validator](https://github.com/arduino/library-registry)
-runs on a registry submission, so anything green here is guaranteed to
-pass the registry bot.
+Green across all three FQBNs means a change still builds on the RP2040
+flight target, on a small AVR (catches accidental large-type or
+C++17-only usage), and on a different toolchain (catches Wire/SPI
+assumptions) — the regressions most likely to slip past a single-board
+local build.
 
 Check status:
 https://github.com/yassinebkr/MMC5983MA/actions/workflows/arduino-compile.yml
@@ -144,5 +145,3 @@ The Arduino library version lives in
    git tag 0.2.0
    git push origin 0.2.0
    ```
-6. Library Manager auto-picks up new tags on registered repos (see
-   `arduino/library.properties` for registration state).
