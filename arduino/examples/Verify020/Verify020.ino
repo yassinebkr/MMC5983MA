@@ -2,18 +2,39 @@
 //
 // Exercises every new API path added in 0.2.0 against the real chip and
 // prints PASS/FAIL for each check. Upload once, watch the serial monitor
-// at 115200 baud, confirm "ALL TESTS PASS" before tagging 0.2.0 for
-// Library Manager release.
+// at 115200 baud, confirm "ALL TESTS PASS" before tagging a release.
 //
-// Wiring: same as BasicI2C (sensor on STEMMA QT / I2C). InterruptDriven
-// is not exercised here -- that one needs the chip's INT pin wired to
-// a Feather GPIO and is verified by uploading InterruptDriven.ino
-// separately.
+// Runs over either bus. By default it uses I2C (sensor on STEMMA QT).
+// To verify the SPI bus path instead, uncomment USE_SPI below and wire
+// the sensor for 4-wire SPI.
+//
+// I2C wiring: SDA -> SDA/GP2, SCL -> SCL/GP3, VDD/VDDIO -> 3V3, GND -> GND.
+//
+// SPI wiring (Feather RP2040 RFM95): CS -> D5/GP7, SCL -> SCK/GP14,
+// SDA -> MOSI/GP15, SDO -> MISO/GP8, VDD/VDDIO -> 3V3, GND -> GND.
+// Disconnect the I2C wiring first.
+//
+// InterruptDriven is not exercised here -- that one needs the chip's
+// INT pin wired to a GPIO and is verified by uploading
+// InterruptDriven.ino separately.
 
-#include <Wire.h>
+// ---- Bus selection --------------------------------------------------------
+// Uncomment to test the SPI bus path; leave commented for I2C.
+// #define USE_SPI
+
 #include <MMC5983MA.h>
 
+#ifdef USE_SPI
+#include <SPI.h>
+// Chip-select pin. D5 / GP7 on the Feather RP2040; change for your board.
+static const uint8_t CS_PIN = 7;
+// SPI clock. Datasheet allows up to 10 MHz; 8 MHz is the library default.
+static const uint32_t SPI_CLOCK_HZ = 8000000UL;
+MMC5983MA mag(SPI, CS_PIN, SPI_CLOCK_HZ);
+#else
+#include <Wire.h>
 MMC5983MA mag(Wire);
+#endif
 
 static int pass_count = 0;
 static int fail_count = 0;
@@ -47,11 +68,22 @@ void setup() {
   while (!Serial) {
   }
 
+#ifdef USE_SPI
+  // On boards whose default SPI pins do not match your wiring (e.g. some
+  // ESP32 variants), pass them explicitly here, e.g.
+  //   SPI.begin(sck, miso, mosi, ss);
+  SPI.begin();
+#else
   Wire.begin();
   Wire.setClock(400000UL);
+#endif
 
   Serial.println();
-  Serial.println("=== MMC5983MA 0.2.0 verification ===");
+#ifdef USE_SPI
+  Serial.println("=== MMC5983MA 0.2.0 verification (SPI) ===");
+#else
+  Serial.println("=== MMC5983MA 0.2.0 verification (I2C) ===");
+#endif
 
   // ----- begin() should succeed -----
   bool b = mag.begin();
